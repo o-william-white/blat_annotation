@@ -1,0 +1,1 @@
+python blat_annotation.py --query query.fasta --reference NC_000932.1 --circular
