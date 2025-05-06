@@ -3,15 +3,20 @@ import subprocess
 from Bio import Entrez
 from Bio import SeqIO
 import pandas as pd
-Entrez.email = "o.william.white@gmail.com"
+import os
 
 # argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--query",      help = "Input query fasta to annotate",  required=True)
+parser.add_argument("--query",      help = "Input fasta to annotate",        required=True)
 parser.add_argument("--reference",  help = "NCBI accession for reference",   required=True)
+parser.add_argument("--email",      help = "Email for Entrez search",        required=True)
 parser.add_argument("--prefix",     help = "Output prefix",                  required=False, default="blat_annotation")
-parser.add_argument("--circular",   help = "Treat input query as circular",  required=False, action="store_true")
+parser.add_argument("--circular",   help = "Input query is circular",        required=False, action="store_true")
+parser.add_argument("--keep",       help = "Keep reference and blat files",  required=False, action="store_true")
 args = parser.parse_args()
+
+# define user email 
+Entrez.email = args.email
 
 # read in query
 query_record = list(SeqIO.parse(args.query, "fasta"))[0]
@@ -63,8 +68,8 @@ with open(f"{args.prefix}_reference_non_coding.fasta", "w") as non_coding_fas:
     SeqIO.write(list_non_coding, non_coding_fas, "fasta")
 
 # run blat
-subprocess.run(["blat", f"{args.prefix}_reference_coding.fasta",  args.query, "-t=dnax", "-q=dnax", "-out=blast8", f"{args.prefix}_output_coding.txt"])
-subprocess.run(["blat", f"{args.prefix}_reference_coding.fasta",  args.query, "-t=dna",  "-q=dna",  "-out=blast8", f"{args.prefix}_output_non_coding.txt"])
+subprocess.run(["blat", f"{args.prefix}_reference_coding.fasta",      args.query, "-t=dnax", "-q=dnax", "-out=blast8", f"{args.prefix}_output_coding.txt"])
+subprocess.run(["blat", f"{args.prefix}_reference_non_coding.fasta",  args.query, "-t=dna",  "-q=dna",  "-out=blast8", f"{args.prefix}_output_non_coding.txt"])
 
 # read blat output into pandas dataframes
 blast8_columns = ["qseqid", "sseqid", "pident", "length", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore"]
@@ -75,9 +80,24 @@ blat_non_coding = pd.read_csv(f"{args.prefix}_output_non_coding.txt", sep="\t", 
 blat_coding_top     = blat_coding.loc[blat_coding.groupby('sseqid')['bitscore'].idxmax()]
 blat_non_coding_top = blat_non_coding.loc[blat_non_coding.groupby('sseqid')['bitscore'].idxmax()]
 
-# concat blat outputs
+# concat coding and noncoding blat outputs
 dat = pd.concat([blat_coding_top, blat_non_coding_top], axis=0)
-dat = dat.sort_values(by="qstart").reset_index()
-dat
+dat = dat.sort_values(by="qstart").reset_index(drop=True)
 
-print(dat)
+# create bed
+bed = dat[["qseqid", "qstart", "qend", "sseqid"]].rename(columns={
+    "qseqid" : "chrom",
+    "qstart" : "start",
+    "qend" : "end",
+    "sseqid" : "name"
+})
+
+# write bed
+bed.to_csv(f"{args.prefix}_example.bed", sep="\t", header=True, index=False)
+
+# remove intermediate files
+if not args.keep:
+    os.remove(f"{args.prefix}_output_coding.txt")
+    os.remove(f"{args.prefix}_output_non_coding.txt")
+    os.remove(f"{args.prefix}_reference_coding.fasta")
+    os.remove(f"{args.prefix}_reference_non_coding.fasta")
